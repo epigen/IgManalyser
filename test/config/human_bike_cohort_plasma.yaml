@@ -1,0 +1,25 @@
+# This project config file describes *project-specific variables*
+project_name: IgM_test
+sample_annotation:  test/config/human_bike_cohort_plasma.csv
+project_path: test/results
+project_config: test/config/human_bike_cohort_plasma.yaml
+data_path: test/data
+sample_metadata: test/meta/human_bike_cohort_plasma.tsv
+array_anotation_path: test/meta/human_array_annotation_anon.tsv
+
+skip_preprocessing: False
+use_custom_QN: False
+custom_QN_file: NA ## path to a custom QN file
+
+group_by: NA ##which variable to visualisations/normalisation by
+
+thresholds:
+    cov_var: 0.8
+    cor_thr: 0.8
+
+core_params_to_plot: 
+    all: "17,18,19,20,21,22,23,24,62" ## which parameters should be visualised 
+    LDL_col: 62 ## the LDL values (not to be used in correlation tests)
+    Gensi_col: 24 ##column to be used for volcano plots containing "outcome" values
+
+
