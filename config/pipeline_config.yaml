@@ -1,0 +1,6 @@
+project_config:  test/config/human_bike_cohort_plasma.yaml
+
+##setup
+partition: 'tinyq'
+memory: '32G'
+threads: 1

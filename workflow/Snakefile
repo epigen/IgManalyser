@@ -1,0 +1,148 @@
+ # libraries
+import yaml
+import pandas as pd
+import os
+import csv
+from collections.abc import Mapping
+
+def get_raw_bams(wildcards): ## to do: adjust the script to process both libraries at the same time
+    #print(str.split(samples[wildcards.sample]["raw_mtx"]))
+    return str.split(samples[wildcards.sample]["raw_mtx"])
+
+
+def update(d, u):
+    """
+    author: sreichl
+    Recursively updates the entries in a given dictionary
+    :param d: The dictionary to be updated
+    :param u: The values which will be added to the input dictionary
+    :return: Updated dictionary
+    """
+    for k, v in u.items():
+        if isinstance(v, Mapping):
+            d[k] = update(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
+
+
+def configurator(default, project_config):
+
+    # Read in project specific config file
+    specific = {}
+    with open(project_config, 'r') as stream:
+        try:
+            specific = yaml.safe_load(stream)
+        except yaml.YAMLError as exception:
+            sys.stderr.write(str(exception))
+           
+    update(default, specific)
+
+    # rename the updated dictionary
+    config = default
+    # Create project directory
+    project_path = config['project_path']
+    
+    if not os.path.exists(project_path):
+        os.makedirs(project_path, exist_ok = True)
+        
+    inputs_dict = {'project_name': config['project_name'],
+                   'project_path': config['project_path'],
+                   'project_config': config['project_config'],
+                   'sample_annotation': config['sample_annotation'],
+                   'sample_metadata': config['sample_metadata'],
+                   'array_anotation_path': config['array_anotation_path'],
+                   'group_by': config['group_by'],
+                   'data_path': config['data_path'],
+                   'partition': config['partition'],
+                   'memory': config['memory'],
+                   'CVTHR': config['thresholds']['cov_var'],
+                   'CORTHR': config['thresholds']['cor_thr'],
+                    'core_params_to_plot': config['core_params_to_plot']['all'],
+                    'gensini_score': config['core_params_to_plot']['Gensi_col'],
+                    'ldl_col': config['core_params_to_plot']['LDL_col'],
+                   'threads': config['threads'],}
+    
+    sas_file = config['sample_annotation']
+    sas_dict = {}
+    with open(sas_file, 'r') as sas:
+        reader = csv.DictReader(sas, dialect='excel')
+        for row in reader:
+            if 'sample_name' in row:
+                if row['sample_name'] in sas_dict:
+                    sas_dict[row['sample_name']].append(row)
+                else:
+                    sas_dict[row['sample_name']] = [row]
+                    
+    inputs_dict['sample_list'] = list(sas_dict.keys())
+    print(config['data_path'])
+    sample_dicts = {}
+    for sample in sas_dict:
+        sample_dict = {'sample_name': sample,
+                       'organism': sas_dict[sample][0]['organism'],
+                       'tissue': sas_dict[sample][0]['tissue'],
+                       'raw_mtx': ''} 
+        
+        csv_sources = [os.path.join(config['data_path'], sample+"_L1.csv"), os.path.join(config['data_path'], sample+"_L2.csv")]
+        raw_size_mb = 0
+        if config.get("skip_preprocessing", False):
+            print('skipping raw data processing')
+        else:
+            if (os.path.exists(csv_sources[0])) and (os.path.exists(csv_sources[1])):
+                sample_dict['raw_mtx'] = ' '.join(csv_sources)
+                sample_dicts[sample]=sample_dict
+            else:
+                print('WARNING: Could not locate one of raw data files for sample {}, skipping.'.format(sample))
+            
+        
+            
+    return inputs_dict, sample_dicts
+    
+    
+##### set & load config and sample annotation sheets #####
+configfile: os.path.join("config","pipeline_config.yaml")
+
+# run configurator to get pipeline configs & sample annotations
+config, samples = configurator(config, config["project_config"])
+
+
+##### set global variables
+results_dir = os.path.join(config["project_path"], "array_results")
+#sample_metadata=pd.read_csv(config["sample_metadata"], index_col=0)
+# cluster parameters
+partition=config['partition']
+mem=config['memory']
+threads=config['threads']
+
+split_subsets = ['Male', 'Female'] ## sex
+print(config["project_path"])
+
+rule all:
+    input:
+        os.path.join(config["project_path"], "normalised_quantiles", "full_samples_normalised.csv") if not config.get("skip_preprocessing", False) else config['custom_QN_file'],
+        expand(os.path.join(config["project_path"], "normalised_quantiles", 'By_{split_group}', '{subset}', '{subset}' + '_pca.csv'), subset  = split_subsets, split_group = 'Sex'),
+        corr_dist = expand(os.path.join(config["project_path"], "correlation", 'By_{split_group}_corr_dist.pdf'), split_group = 'Sex'),
+        pept_hits = expand(os.path.join(config["project_path"], "top_hit_viz", 'By_{split_group}_{subset}', "petides_hits.csv"), split_group = 'Sex', subset = split_subsets),
+        cfa_df = expand(os.path.join(config["project_path"], "CFA", 'By_{split_group}_{subset}', '{subset}_cfa_annot.csv'), split_group = 'Sex',subset = split_subsets),
+        cfa_pca_df = expand(os.path.join(config["project_path"], "CFA", 'By_{split_group}_{subset}', '{subset}_cfa_pca.csv'), split_group = 'Sex',subset = split_subsets),
+    output:
+        confirmation=os.path.join(config["project_path"],"{}_successfully_completed.txt".format(config["project_name"])),
+    params:
+        # cluster parameters
+        partition=partition,
+    threads: threads
+    resources:
+        mem=mem
+    log:
+        os.path.join("logs","rules","all.log")
+    run:
+        command_str="touch {}".format(os.path.join(config["project_path"],"{}_successfully_completed.txt".format(config["project_name"])))
+        subprocess.run(command_str, shell=True)
+
+        
+include: "rules/QC.smk"
+include: "rules/QN.smk"
+include: "rules/Annotate.smk"
+include: "rules/Predict.smk"
+
+    
