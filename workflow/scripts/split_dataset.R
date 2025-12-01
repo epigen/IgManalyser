@@ -1,7 +1,7 @@
 snakemake@source("init.R")
 snakemake@source("QN_functions.R")
 
-save.image("split.RData")
+#save.image("split.RData")
 
 array_df <- fread(snakemake@input[['array_file_QN']], header = TRUE)
 #colnames(array_df) <- gsub("V", "", colnames(array_df))

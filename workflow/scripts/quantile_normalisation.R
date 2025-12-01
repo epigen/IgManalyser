@@ -1,4 +1,4 @@
-save.image("QN.RData")
+#save.image("QN.RData")
 
 snakemake@source("init.R")
 snakemake@source("QN_functions.R")
