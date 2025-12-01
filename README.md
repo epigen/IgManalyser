@@ -3,6 +3,12 @@ IgM binding array processing pipeline for the Binder lab from input raw csv file
 
 ## Run on CeMM cluster
 snakemake --profile ~/cemm.slurm.sm/
+To prepare the run you need to:  
+- specify the project config path adjust the cluster settings to your HPC in the config/pipeline_config.yml
+- specify the paths and the run-specific parameters in the project config file. The example config file with explanations is provided in test.
+The pipeline can run in two modes: either with or without preprocessing (from individual samples with technical replicas to QN files), regulated by flag skip_preprocessing. Flag should be set to True if only goal is to repeat downstream analysis with different parameters or reproduce downstream analysis on two cohorts merged together.
+To provide a custom (i.e. batch-corrected from two runs) QN files use a flag use_custom_QN and in this case provide path to the QN file to use in custom_QN_file file.
+Default pipeline separates samples by sex for downstream analysis. Make sure that the metadata file contains the *Sex* column, that specifies Male and Female for patient annotation. If other value groups are used, please modify it at *line 117 of the snakemake file*.
 
 ### Metadata description
 1. Annotation table:
@@ -10,8 +16,9 @@ snakemake --profile ~/cemm.slurm.sm/
 2. Metadata table
 Metadata table should contain fixed first six colummns with sample annotaiton introduction:
 Sample_full_ID - sample id, same as in file names and anntation table, followed by columns providing information about the patient encrollment in the cohort: Record ID,Event Name,IRB Protocol,Date of Study Enrollment ,Age at Consent. This information is not used downstream, however those columns are skipped by the pipeline, so it's important to keep them (even as empty columns).
-Further columns contain numeric and categorical metadata. If there is no information avaliable for a given sample, please keep the column empty! Should be comma-separated
-3. Peptide annotation table
+Further columns contain numeric and categorical metadata. If there is no information avaliable for a given sample, please keep the column empty. Make sure that column names are R-friendly and don't contain any special characters. 
+File should be comma-separated.
+4. Peptide annotation table
 For each peptide coordinate prepare a tab-separated information file, contating the following information:
 - row, column (see the input data description)
 - Coordinate (row_column)
