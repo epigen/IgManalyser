@@ -18,8 +18,8 @@ thresholds:
     cor_thr: 0.8
 
 core_params_to_plot: 
-    all: "17,18,19,20,21,22,23,24,62" ## which parameters should be visualised 
-    LDL_col: 62 ## the LDL values (not to be used in correlation tests)
-    Gensi_col: 24 ##column to be used for volcano plots containing "outcome" values
+    all: "10,12,13,14" ## which parameters should be visualised in correlation and confounding analysis
+    LDL_col: 14 ## the LDL values (not to be used in correlation tests)
+    Gensi_col: 13 ##column to be used for volcano plots containing "disease outcome" values (either as Gensini score or as categorical disease phenotype values)
 
 

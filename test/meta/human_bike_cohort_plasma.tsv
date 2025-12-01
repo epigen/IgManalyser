@@ -1,0 +1,9 @@
+Sample_full_ID,Record ID,Event Name,IRB Protocol,Date of Study Enrollment ,Age at Consent,tissue,organism,Sex,Param1,Param2,Param3,Gensini,LDL_val
+284,,,,,,plasma,human,Male,5,B,100,40,4
+344,,,,,,plasma,human,Female,10,A,150,60,12
+371,,,,,,plasma,human,Female,3,B,160,4,2
+515,,,,,,plasma,human,Male,20,A,90,1,10
+507,,,,,,plasma,human,Male,10,A,75,3,10
+602,,,,,,plasma,human,Female,38,B,150,1,1
+475,,,,,,plasma,human,Male,10,A,75,30,10
+417,,,,,,plasma,human,Female,38,B,150,35,1
