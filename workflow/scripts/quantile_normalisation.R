@@ -1,3 +1,12 @@
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+
+  BiocManager::install("preprocessCore", 
+                     configure.args = "--disable-threading", 
+                     force = TRUE,
+                     type = "source")
+}
+
 #save.image("QN.RData")
 
 snakemake@source("init.R")
@@ -11,7 +20,7 @@ annot <- fread(metadataPath)
 group_by <- snakemake@params[["group_by"]]
 
 outpath <- snakemake@params[['normPath']]
-dir.create(outpath)
+dir.create(outpath, recursive = TRUE, showWarnings = FALSE)
 
 if(group_by == 'NA'){
     annot$group_col = "group"} ##TODO: grouping by phenotype, etc
@@ -45,10 +54,9 @@ full_array <-full_array[as.character(annot$sample_name)]
 group1 <- which(annot$group_col == group1_id)
 group2 <- which(annot$group_col == group2_id) 
 if(!is.na(group2_id)){
-    
     full_array_norm <- get_QN_norm(full_array_L1, group1, group2)
 }else{
-full_array_norm <- get_QN_norm_onegroup(full_array, group1)
+    full_array_norm <- get_QN_norm_onegroup(full_array, group1)
 }
 
 
