@@ -6,7 +6,7 @@ IgM binding array processing pipeline for the Binder lab from input raw csv file
 ### Running the pipeline
 To perform a test run from an environment with installed snakemake (tested on snakemake8).
 ```
-snakemake --profile ~/cemm.slurm.sm/
+snakemake --profile <your_HPC_profile.sm>
 ```
 ### Setup
 To prepare the run you need to:  
