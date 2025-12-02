@@ -47,3 +47,4 @@ Each CSV file contains two technical replicas with rows and columns correspondin
 ## Downstream data analysis
 In the paper 3 separate cohorts where used: 
 CAVA cohort, profiled in 2 batches and BIKE cohorts for plasma and aorta plaque samples (matched). The two batches of CAVA cohort where processed independantly, then quantile normalised files with corrected for batch effect as shown in the ``downstream_analysis/XX.ipynb``. Created file was further re-analsyed within the pipeline, using the *custom_QN_file* option.
+For some downstream steps of the BIKE cohort we customly repeated the quantile normalisation on the combined array across tissues: ``downstream_analysis/BIKE_normalization_QN_across_tissues.ipynb``
