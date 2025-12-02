@@ -1,0 +1,447 @@
+---
+title: "Exploring plasma and plaque repertoire (PCA-diversity-paired analysis of top reactivities"
+output: html_notebook
+---
+
+#Libraries needed
+```{r}
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidyverse)
+library(vegan)
+library(ggplot2)
+```
+
+#PCA visualization of quantile normalized data accross tissue plasma and plaque
+```{r}
+##load data
+joint_qn_file <-read.csv("/path_to_data_here/QN_both_tissues.csv",check.names = FALSE) 
+
+#row= unique_coordinate 
+#column=patient with intensity values (quantile nomalized)
+
+##rename column to match with array name column
+colnames(joint_qn_file)[1] <- "unique_coordinate"
+
+#Pick sample columns & build matrix
+sample_cols <- setdiff(names(joint_qn_file), "unique_coordinate")
+M <- joint_qn_file %>% select(all_of(sample_cols))
+rownames(M) <- joint_qn_file$unique_coordinate
+
+#Samples x peptides
+X <- t(as.matrix(M))
+
+#Simple metadata from column names
+tissue <- ifelse(grepl("^plaque_", rownames(X)), "plaque", "plasma")
+
+#PCA
+pca <- prcomp(X, center = TRUE, scale. = TRUE)
+var_exp <- (pca$sdev^2) / sum(pca$sdev^2)
+
+scores <- data.frame(
+  sample = rownames(pca$x),
+  tissue = tissue[match(rownames(pca$x), rownames(X))],
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  PC3 = pca$x[,3]
+)
+
+# plot
+g <- ggplot(scores, aes(PC1, PC2, color = tissue)) +
+  geom_point(size = 2.6, alpha = 0.95) +
+  stat_ellipse(aes(group = tissue), level = 0.68, linewidth = 0.5) +
+  labs(title = "PCA (QN) on all peptide reactivities",
+       subtitle = paste0("Features used: ", ncol(X)),
+       x = paste0("PC1 (", round(100*var_exp[1], 1), "%)"),
+       y = paste0("PC2 (", round(100*var_exp[2], 1), "%)")) +
+  theme_minimal(base_size = 12)
+
+print(g)  # show in Plots pane
+
+#save
+ggsave("/data_path_here/PCA_QN_allReact.pdf", g, width = 7, height = 5, dpi = 300)
+
+write.csv(scores, "/data_path_here/PCA_QN_allReact_scores.csv", row.names = FALSE)
+
+#save loadings to see which peptides drive PCs
+loadings <- data.frame(
+  peptide = rownames(pca$rotation),
+  PC1 = pca$rotation[,1],
+  PC2 = pca$rotation[,2],
+  PC3 = pca$rotation[,3]
+)
+write.csv(loadings, "/data_path_here/PCA_QN_allReact_loadings.csv", row.names = FALSE)
+```
+
+-------------------------------
+#DIVERSITY ANALYSIS
+##Data loading and preprocessing (we need to work with non quantile normalized data for diversity analysis!)
+```{r}
+##Load csv files (not quantile normalised) containing replicate data
+ #Column structure must be : 
+  #[1] "peptide"        "variable"       "replica1"      
+ #[4] "replica2"       "delta"          "sdev"          
+ #[7] "avrg"           "cov_var"        "library"       
+#[10] "cor_coef"       "lib_and_cor"    "sample_name"   
+#[13] "tissue"         "organism"       "color_col"     
+#[16] "status"         "Coordinate"     "sequence"      
+#[19] "sequence_label" "is_duplicate" 
+
+plasma_file<- read.delim("/path_to_data_here/aggregated/full_samples_combined.csv")
+
+plaque_file <- read.delim("/path_to_data_here/aggregated/full_samples_combined.csv")
+
+# Create unique peptide coordinate: "L1_C1_L1" etc...
+plaque_file <- plaque_file %>%
+  mutate(coordinate_unique = paste0(Coordinate, "_", library))
+
+plasma_file <- plasma_file %>%
+  mutate(coordinate_unique = paste0(Coordinate, "_", library))
+
+# Keep only the columns we need to pivot
+plaque_core <- plaque_file %>%
+  select(coordinate_unique, sequence_label, sample_name, avrg)
+
+plasma_core <- plasma_file %>%
+  select(coordinate_unique, sequence_label, sample_name, avrg)
+
+# Pivot to wide: one column per sample (plaque_284, plaque_417, ...)
+plaque_cor_wide <- plaque_core %>%
+  pivot_wider(
+    names_from  = sample_name,
+    values_from = avrg
+  )
+
+plasma_cor_wide <- plasma_core %>%
+  pivot_wider(
+    names_from  = sample_name,
+    values_from = avrg
+  )
+
+##Remove "plaque_" from column names in the plaque table
+plaque_cor_wide <- plaque_cor_wide %>%
+  rename_with(~ str_remove(.x, "^plaque_"), starts_with("plaque_"))
+
+##Work out which columns are sample columns (not the two id columns)
+id_cols <- c("coordinate_unique", "sequence_label")
+plasma_samples <- setdiff(names(plasma_bis_wide), id_cols)
+plaque_samples <- setdiff(names(plaque_clean),      id_cols)
+
+##Take the intersection so we only keep samples present in BOTH (paired approach)
+common_samples <- sort(intersect(plasma_samples, plaque_samples))
+
+##Keep only those samples, and put them in the same order in both tibbles
+plaque_matched <- plaque_clean %>%
+  select(all_of(id_cols), all_of(common_samples)) 
+
+plasma_matched<- plasma_cor_wide %>%
+  select(all_of(id_cols), all_of(common_samples))
+ 
+```
+
+##Diversity indexes calculation (tresholde and untresholded) : shannon and gini indexes
+```{r}
+#Parameters that can be modified to calculate diversity indexes (here we calculated diversity for top 30% reactivities) 
+keep_top_frac <- 0.30   # e.g., 0.30 = top 30%
+array_size    <- 729    # total peptides on the array (optional, for normalization)
+
+# Pull sample matrix; safely drop common id columns if present
+get_sample_mat <- function(df_wide, id_cols = c("coordinate_unique","sequence_label","unique_coordinate")) {
+  df_wide %>% select(-any_of(id_cols)) %>% as.data.frame()
+}
+
+# Gini coefficient (non-negative vector)
+gini_coef <- function(x) {
+  x <- x[is.finite(x) & x >= 0]
+  if (length(x) == 0 || sum(x) == 0) return(NA_real_)
+  x <- sort(x)
+  n <- length(x); S <- sum(x)
+  (2 * sum(x * seq_len(n))) / (n * S) - (n + 1) / n
+}
+
+#Core function: keep only the top X% by rank 
+calc_diversity_topfrac <- function(df_wide,
+                                   tissue_label,
+                                   keep_top_frac = 0.30) {
+  stopifnot(is.numeric(keep_top_frac), keep_top_frac > 0, keep_top_frac <= 1)
+
+  X       <- get_sample_mat(df_wide)
+  samples <- names(X)
+
+  res <- lapply(samples, function(s) {
+    x <- as.numeric(X[[s]])
+    x[is.na(x)] <- 0
+
+    n_pep <- length(x)
+    total <- sum(x)
+
+    # Unthresholded metrics
+    p  <- if (total > 0) x / total else x
+    H  <- vegan::diversity(x, index = "shannon")
+    R  <- sum(x > 0)
+    J  <- if (R > 1) H / log(R) else NA_real_
+    ED <- exp(H)
+    HHI <- if (total > 0) sum(p^2) else NA_real_
+    G   <- gini_coef(x)
+
+    # Build top-fraction mask by rank (keeps exactly K largest)
+    k_top <- max(1, ceiling(keep_top_frac * n_pep))
+    ord   <- order(x, decreasing = TRUE)
+    keep  <- rep(FALSE, n_pep); keep[ord[seq_len(k_top)]] <- TRUE
+
+    x_thr <- ifelse(keep, x, 0)
+    tot_m <- sum(x_thr)
+    p_m   <- if (tot_m > 0) x_thr / tot_m else x_thr
+
+    # Thresholded metrics (renormalized to survivors)
+    R_thr <- sum(x_thr > 0)
+    H_thr <- if (tot_m > 0) -sum(p_m[p_m > 0] * log(p_m[p_m > 0])) else NA_real_
+    J_thr <- if (R_thr > 1 && is.finite(H_thr)) H_thr / log(R_thr) else NA_real_
+    ED_thr <- if (is.finite(H_thr)) exp(H_thr) else NA_real_
+    HHI_thr <- if (tot_m > 0) sum(p_m^2) else NA_real_
+    G_thr <- gini_coef(x_thr)
+
+    # Share of total intensity carried by the top-fraction peptides
+    top_share <- if (total > 0) tot_m / total else NA_real_
+
+    tibble(
+      tissue = tissue_label,
+      sample = s,
+      peptides_total = n_pep,
+      keep_top_frac = keep_top_frac,
+      k_top = k_top,
+
+      # Unthresholded
+      richness_pos = R,
+      shannon = H,
+      evenness = J,
+      effective_diversity = ED,
+      HHI = HHI,
+      gini = G,
+
+      # Thresholded (top-fraction)
+      richness_thr = R_thr,
+      shannon_thr = H_thr,
+      evenness_thr = J_thr,
+      effective_diversity_thr = ED_thr,
+      HHI_thr = HHI_thr,
+      gini_thr = G_thr,
+      top_share = top_share
+    )
+  })
+
+  bind_rows(res)
+}
+
+# RUN on your wide matrices 
+# Expecting: columns = id cols + sample IDs
+#   plasma_matched
+#   plaque_matched
+
+plasma_top  <- calc_diversity_topfrac(plasma_matched, "plasma", keep_top_frac = keep_top_frac)
+plaque_top  <- calc_diversity_topfrac(plaque_matched, "plaque", keep_top_frac = keep_top_frac)
+
+div_all <- bind_rows(plasma_top, plaque_top) %>%
+  mutate(
+    eff_div_norm     = effective_diversity      / array_size,
+    eff_div_thr_norm = effective_diversity_thr  / array_size
+  )
+
+#quick QC:
+print(div_all %>% select(tissue, sample, keep_top_frac, k_top, top_share, shannon, gini, shannon_thr, gini_thr))
+
+```
+
+-------------------------------
+#Forest plot style for paired analysis (plasma/plaque) of top X reactivities
+```{r}
+##(re)load join_QN_file data
+df <- read.csv("/data_path_here/filename.csv")##containing sample IDs-unique peptide coordinate
+
+clinical_data <- read.csv("/data_path_here/filename.csv") ###clinical data must at least contain : 
+#[1] "Sample_full_ID"    (patient ID) and  #[1]X where X is a given clinical parameter (i.e SEX,AGE..etc...)   
+
+
+peptide_info <- read.csv("/data_path_here/filename.csv") ##containing -unique peptide coordinate-peptide sequences
+```
+
+##Data preprocessing
+```{r}
+###Make a clean patient annotation table from clinical_data
+
+df <- read.csv("/path_to_data_here/QN_both_tissues.csv",check.names = FALSE)##same file as above (joint QN normalized data)
+
+patient_anno <- clinical_data %>%
+  select(Sample_full_ID, Sex, Symptom) %>%
+  mutate(Sample_full_ID = as.character(Sample_full_ID))
+
+###Prepare peptide metadata with short peptide labels
+peptide_meta <- peptide_info %>%
+  select(coordinate_unique, sequence_label) %>%
+  mutate(sequence_short = str_extract(sequence_label, "^[^-]+"))
+
+###Reshape df (peptide × patients) to long format
+df_long <- df %>%
+  rename(coordinate_unique = 1) %>%  # make first col name explicit
+  pivot_longer(
+    cols = -coordinate_unique,
+    names_to = "patient",
+    values_to = "intensity"
+  )
+
+###Clean patient IDs (remove 'plaque_' prefix for matching)
+df_long <- df_long %>%
+  mutate(patient_id = str_replace(patient, "^plaque_", ""))
+
+###Add patient annotation
+df_long <- df_long %>%
+  left_join(patient_anno, by = c("patient_id" = "Sample_full_ID"))
+
+###Add peptide annotation
+df_long <- df_long %>%
+  left_join(peptide_meta, by = "coordinate_unique")
+
+#Identify plasma vs plaque samples
+
+df2 <- df_long %>%
+  mutate(
+    sample_type = if_else(str_detect(patient, "plaque_"), "Plaque", "Plasma"),
+    patient_clean = str_replace(patient, "plaque_", "")
+  )
+
+#Compute mean intensity per peptide per sample type
+mean_peptide <- df2 %>%
+  group_by(sequence_short, sample_type) %>%
+  summarise(mean_int = mean(intensity, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = sample_type, values_from = mean_int)
+```
+
+##Select top 10 peptides enriched in each tissue
+```{r}
+top10_plaque <- mean_peptide %>%
+  arrange(desc(Plaque)) %>%
+  slice(1:10) %>%
+  pull(sequence_short)
+
+top10_plasma <- mean_peptide %>%
+  arrange(desc(Plasma)) %>%
+  slice(1:10) %>%
+  pull(sequence_short)
+
+# Union — remove duplicates (if we have overlaping reativities in each top 10)
+top_peptides <- union(top10_plaque, top10_plasma)
+```
+
+##Build patient-level paired data
+```{r}
+df_pairs <- df2 %>%
+  filter(sequence_short %in% top_peptides) %>%
+  group_by(sequence_short, patient_clean, sample_type) %>%
+  summarise(mean_intensity = mean(intensity, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    names_from = sample_type,
+    values_from = mean_intensity
+  ) %>%
+  # Keep only true pairs (both measurements present)
+  filter(!is.na(Plasma), !is.na(Plaque)) %>%
+  mutate(diff = Plaque - Plasma)
+```
+
+##Compute paired t-tests + BH correction + CI (95%) + add significance
+```{r}
+df_summary_diff <- df_pairs %>%
+  group_by(sequence_short) %>%
+  summarise(
+    n           = n(),
+    mean_plasma = mean(Plasma, na.rm = TRUE),
+    mean_plaque = mean(Plaque, na.rm = TRUE),
+    mean_diff   = mean(diff,   na.rm = TRUE),
+    sd_diff     = sd(diff,     na.rm = TRUE),
+    se_diff     = sd_diff / sqrt(n),
+    ci_low      = mean_diff - 1.96 * se_diff,
+    ci_high     = mean_diff + 1.96 * se_diff,
+    p_value     = t.test(Plaque, Plasma, paired = TRUE)$p.value,
+    .groups     = "drop"
+  ) %>%
+  # multiple-testing correction for reporting only
+  mutate(
+    p_adj = p.adjust(p_value, method = "BH"),
+
+    # significance for coloring & stars based on *raw* p_value
+    signif_label = case_when(
+      p_value < 0.001 ~ "***",
+      p_value < 0.01  ~ "**",
+      p_value < 0.05  ~ "*",
+      TRUE            ~ ""
+    ),
+    sig_raw = p_value < 0.05,
+
+    direction = case_when(
+      mean_diff > 0  ~ "Higher in plaque",
+      mean_diff < 0  ~ "Higher in plasma",
+      TRUE           ~ "No difference"
+    )
+  ) %>%
+  arrange(mean_diff) %>%
+  mutate(sequence_short = factor(sequence_short, levels = sequence_short))
+
+#Export CSVs
+write.csv(df_pairs,"/data_save_path/filename.csv",row.names = FALSE)
+
+write.csv(df_summary_diff,"/data_save_path/filename.csv",row.names = FALSE)
+```
+
+##Plot
+```{r}
+output_dir <- "/save_path/"
+
+# Make sure the folder exists
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+
+output_file <- paste0(output_dir, "filename.pdf")
+
+pdf(output_file, width = 9, height = 7, useDingbats = FALSE)
+
+ggplot(df_summary_diff,
+       aes(x = mean_diff, y = sequence_short)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+
+  geom_errorbarh(aes(xmin = ci_low, xmax = ci_high),
+                 height = 0.15, color = "grey60") +
+
+  # points: grey if non-significant by raw p
+  geom_point(aes(color = ifelse(sig_raw, direction, "NS")),
+             size = 3) +
+
+  # stars: based on raw p (signif_label)
+  geom_text(aes(label = signif_label),
+            nudge_x = 0,
+            vjust = -0.7,
+            size = 3) +
+
+  scale_color_manual(
+    values = c(
+      "Higher in plaque" = "#ef8a62",
+      "Higher in plasma" = "#67a9cf",
+      "NS"               = "grey70"
+    ),
+    breaks = c("Higher in plaque", "Higher in plasma", "NS"),
+    labels = c("Higher in plaque", "Higher in plasma", "Not significant (raw p ≥ 0.05)"),
+    name   = ""
+  ) +
+  labs(
+    x = "Mean paired difference (Plaque - Plasma)",
+    y = "Peptide"
+  ) +
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position    = "top",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank()
+  )
+# --- End plot ---
+dev.off()
+```
+
