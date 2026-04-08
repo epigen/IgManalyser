@@ -4,10 +4,15 @@ IgM binding array processing pipeline for the Binder lab from input raw csv file
 ## IgM processing pipeline
 
 ### Running the pipeline
-To perform a test run from an environment with installed snakemake (tested on snakemake8).
+#### On HPC
+To perform a test run clone the repository and run from an environment with installed snakemake (tested on snakemake8).
+
 ```
 snakemake --profile <your_HPC_profile.sm>
 ```
+#### On PC
+Coming later. 
+
 ### Setup
 To prepare the run you need to:  
 - specify the project config path adjust the cluster settings to your HPC in the ``config/pipeline_config.yml``
